@@ -259,18 +259,31 @@ class ProductAsset:
         Con nine_slice, el grosor de la perfileria se mantiene (solo estira el
         vidrio), que es como se comporta una ventana a medida real.
         """
-        if not self.nine_slice:
+        '''if not self.nine_slice:
             interp = cv2.INTER_AREA if out_w < self.rgb.shape[1] else cv2.INTER_CUBIC
             pre = cv2.resize(self.rgb * self.alpha[..., None], (out_w, out_h), interpolation=interp)
             a = cv2.resize(self.alpha, (out_w, out_h), interpolation=interp)
-            return pre, np.clip(a, 0, 1)
+            return pre, np.clip(a, 0, 1)'''
+
+        h0, w0 = self.alpha.shape
+        x0, y0, x1, y1 = self.rect_interior
+
+        if not self.nine_slice:
+            interp = cv2.INTER_AREA if out_w < w0 else cv2.INTER_CUBIC
+            pre = cv2.resize(self.rgb * self.alpha[..., None], (out_w, out_h), interpolation=interp)
+            a = cv2.resize(self.alpha, (out_w, out_h), interpolation=interp)
+            sx, sy = out_w / w0, out_h / h0
+            rect = (int(x0 * sx), int(y0 * sy), int(x1 * sx), int(y1 * sy))
+            return pre, np.clip(a, 0, 1), rect
+
 
         pre_full = self.rgb * self.alpha[..., None]
         capas = [pre_full, self.alpha[..., None]]
         salidas = []
 
-        h, w = self.alpha.shape
-        x0, y0, x1, y1 = self.rect_interior
+        #h, w = self.alpha.shape
+        #x0, y0, x1, y1 = self.rect_interior
+        h, w = h0, w0 # new
         L, R, T, B = x0, w - x1, y0, h - y1
 
         # el marco se escala con el factor global mas suave para no deformarse
@@ -302,7 +315,9 @@ class ProductAsset:
                     out[oa:ob, oc:od] = r.reshape(ob - oa, od - oc, capa.shape[2])
             salidas.append(out)
 
-        return salidas[0], np.clip(salidas[1][:, :, 0], 0, 1)
+        rect = (oL, oT, oL + mid_w, oT + mid_h)   # donde ha caido el vidrio
+        return salidas[0], np.clip(salidas[1][:, :, 0], 0, 1), rect
+        #return salidas[0], np.clip(salidas[1][:, :, 0], 0, 1)
 
 
 # ===========================================================================
@@ -528,23 +543,23 @@ def placa_limpia(image_bgr, mask, dilatar=14, lado_lama=896,
     else:
         peq, peq_m = crop, crop_m
 
-        try:
-            if _LAMA is None:
-                from simple_lama_inpainting import SimpleLama
-                _LAMA = SimpleLama(device=device) if device else SimpleLama()
-            from PIL import Image
-            out = _LAMA(Image.fromarray(peq[:, :, ::-1]), Image.fromarray(peq_m))
+    try:
+        if _LAMA is None:
+            from simple_lama_inpainting import SimpleLama
+            _LAMA = SimpleLama(device=device) if device else SimpleLama()
+        from PIL import Image
+        out = _LAMA(Image.fromarray(peq[:, :, ::-1]), Image.fromarray(peq_m))
 
-            # LaMa rellena hasta multiplo de 8 y NO deshace ese relleno:
-            # hay que recortar a las dimensiones que le dimos.
-            ph, pw = peq.shape[:2]
-            rel_peq = np.array(out)[:ph, :pw, ::-1]
+        # LaMa rellena hasta multiplo de 8 y NO deshace ese relleno:
+        # hay que recortar a las dimensiones que le dimos.
+        ph, pw = peq.shape[:2]
+        rel_peq = np.array(out)[:ph, :pw, ::-1]
 
-            rel = cv2.resize(rel_peq, (cw, ch), interpolation=cv2.INTER_CUBIC) \
-                if esc < 1.0 else rel_peq
-        except Exception as e:
-            print(f"[placa] LaMa fallo ({type(e).__name__}: {e}); usando cv2.inpaint")
-            rel = cv2.inpaint(crop, crop_m, 7, cv2.INPAINT_TELEA)
+        rel = cv2.resize(rel_peq, (cw, ch), interpolation=cv2.INTER_CUBIC) \
+            if esc < 1.0 else rel_peq
+    except Exception as e:
+        print(f"[placa] LaMa fallo ({type(e).__name__}: {e}); usando cv2.inpaint")
+        rel = cv2.inpaint(crop, crop_m, 7, cv2.INPAINT_TELEA)
 
     # --- pegar SOLO dentro de la mascara: el resto de la foto no se toca
     a = cv2.GaussianBlur(crop_m.astype(np.float32) / 255.0, (0, 0), 2.0)[..., None]
@@ -568,6 +583,8 @@ class Escena:
     color_cielo_bgr: Tuple[float, float, float]
     sigma_ruido: float
     iou_ajuste: float
+    quad_ref: Optional[np.ndarray] = None
+    ref_foto: Optional[dict] = None
 
     def guardar(self, carpeta: str):
         os.makedirs(carpeta, exist_ok=True)
@@ -575,9 +592,15 @@ class Escena:
         cv2.imwrite(os.path.join(carpeta, "hueco.png"), self.mask_hueco)
         if self.mask_oclusores is not None:
             cv2.imwrite(os.path.join(carpeta, "oclusores.png"), self.mask_oclusores)
-        meta = {k: v for k, v in asdict(self).items()
+        '''meta = {k: v for k, v in asdict(self).items()
                 if k not in ("placa", "mask_hueco", "mask_oclusores")}
+        meta["quad"] = self.quad.tolist()'''
+
+        meta = {k: v for k, v in asdict(self).items()
+                if k not in ("placa", "mask_hueco", "mask_oclusores", "quad_ref")}
         meta["quad"] = self.quad.tolist()
+        meta["quad_ref"] = self.quad_ref.tolist() if self.quad_ref is not None else None
+
         with open(os.path.join(carpeta, "escena.json"), "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
 
@@ -594,7 +617,9 @@ class Escena:
                       color_pared_bgr=tuple(meta["color_pared_bgr"]),
                       color_cielo_bgr=tuple(meta["color_cielo_bgr"]),
                       sigma_ruido=meta["sigma_ruido"],
-                      iou_ajuste=meta["iou_ajuste"])
+                      iou_ajuste=meta["iou_ajuste"],
+                      quad_ref=(np.array(meta["quad_ref"], np.float32) if meta.get("quad_ref") else None),
+                      ref_foto=meta.get("ref_foto"))
 
 
 def _color_anillo_pared(img, quad, grosor=0.10):
@@ -656,7 +681,7 @@ def analizar_fachada(ruta_foto: str,
     escala = min(1.0, lado_deteccion / max(H, W))
     peq = cv2.resize(foto, (int(W * escala), int(H * escala)),
                      interpolation=cv2.INTER_AREA) if escala < 1 else foto
-
+    quad_ref = None
     if quad_manual is not None:
         quad = ordenar_puntos(np.asarray(quad_manual, np.float32))
         mask_full = np.zeros((H, W), np.uint8)
@@ -677,6 +702,12 @@ def analizar_fachada(ruta_foto: str,
         b1, b2 = test > 127, mask > 127
         iou = float(np.count_nonzero(b1 & b2)) / max(np.count_nonzero(b1 | b2), 1)
 
+        for m_alt in masks[1:]:
+            try:
+                quad_ref = ajustar_cuadrilatero(m_alt, gray) / escala
+                break
+            except Exception:
+                continue
         # >>> clave: las esquinas vuelven a RESOLUCION COMPLETA
         quad = quad_peq / escala
         mask_full = cv2.resize(mask, (W, H), interpolation=cv2.INTER_NEAREST)
@@ -711,7 +742,10 @@ def analizar_fachada(ruta_foto: str,
                   color_pared_bgr=_color_anillo_pared(foto, quad),
                   color_cielo_bgr=_color_cielo(foto),
                   sigma_ruido=_estimar_ruido(foto, quad),
-                  iou_ajuste=iou)
+                  iou_ajuste=iou,
+                quad_ref=quad_ref,
+                  ref_foto=(medir_referencia(foto, quad_ref)
+                            if quad_ref is not None else None))
 
 
 # ===========================================================================
@@ -780,7 +814,7 @@ def _oclusion_contacto(img, quad, fuerza=0.35, ancho_rel=0.035):
 
 def renderizar(escena: Escena,
                asset: ProductAsset,
-               retranqueo: float = 0.018,
+               retranqueo: float = 0.018, #0.018,
                reflejo: float = 0.22,
                grano: bool = True,
                supersample: float = 1.6) -> np.ndarray:
@@ -790,7 +824,7 @@ def renderizar(escena: Escena,
     quad_hueco = escena.quad
     quad_win = encoger_quad(quad_hueco, retranqueo, retranqueo * 0.6)
 
-    # 1) escalar el asset (nine-slice) a un tamano ligeramente superior al final:
+    ''' # 1) escalar el asset (nine-slice) a un tamano ligeramente superior al final:
     #    warpPerspective aliasea muchisimo la perfileria fina si no sobremuestreas
     tw, th = tam_objetivo(quad_win)
     pre, a = asset.escalar(int(tw * supersample), int(th * supersample))
@@ -799,7 +833,25 @@ def renderizar(escena: Escena,
     if reflejo > 0:
         rgb = pre / np.maximum(a[..., None], 1e-4)
         rgb = _reflejo_cristal(rgb, a, escena.color_cielo_bgr, reflejo)
-        pre = rgb * a[..., None]
+        pre = rgb * a[..., None]'''
+
+    # 1) escalar el asset (nine-slice) a un tamano ligeramente superior al final
+    tw, th = tam_objetivo(quad_win)
+    pre, a, rect_vidrio = asset.escalar(int(tw * supersample), int(th * supersample))
+
+    rgb = pre / np.maximum(a[..., None], 1e-4)
+
+    # 2a) ARMONIZAR contra una ventana real de la misma foto: exposicion,
+    #     temperatura de color y oscuridad del cristal, todo de una vez
+    if escena.ref_foto is not None:
+        rgb = _armonizar_por_referencia(rgb, a, rect_vidrio, escena.ref_foto)
+
+    # 2b) reflejo de cielo, ya en el espacio de luz de la escena
+    if reflejo > 0:
+        rgb = _reflejo_cristal(rgb, a, escena.color_cielo_bgr, reflejo)
+
+    pre = rgb * a[..., None]
+
 
     # 3) homografia. Alfa PREMULTIPLICADO -> sin halos oscuros en los perfiles
     hs, ws = a.shape
@@ -861,14 +913,63 @@ def debug_escena(escena: Escena, salida="debug_escena.jpg"):
     cv2.imwrite(salida, vis)
     return vis
 
+def medir_referencia(foto_bgr, quad_ref, frac_marco=0.20):
+    """Brillo y color reales de una ventana YA EXISTENTE en la misma foto.
+
+    Es el mejor patron posible: misma luz, mismo muro, misma camara, mismo
+    balance de blancos. Mejor que cualquier constante que estimemos a ojo.
+    """
+    h, w = foto_bgr.shape[:2]
+    fuera = np.zeros((h, w), np.uint8)
+    cv2.fillConvexPoly(fuera, quad_ref.astype(np.int32), 255)
+    dentro = np.zeros((h, w), np.uint8)
+    cv2.fillConvexPoly(dentro, encoder_expandir(quad_ref, 1 - 2*frac_marco).astype(np.int32), 255)
+    marco = cv2.subtract(fuera, dentro)
+
+    pm = foto_bgr[marco > 0].astype(np.float32) / 255.0
+    pv = foto_bgr[dentro > 0].astype(np.float32) / 255.0
+    if len(pm) < 30 or len(pv) < 30:
+        return None
+    #return {"marco": np.median(pm, 0), "vidrio": np.median(pv, 0)}
+    return {"marco": np.median(pm, 0).tolist(),"vidrio": np.median(pv, 0).tolist()}
+
+def _armonizar_por_referencia(rgb, alpha, rect_vidrio, ref,
+                              fuerza=0.85, gain_max=3.0):
+    """Lleva marco y vidrio del producto al brillo medido en una ventana real.
+
+    Corrige exposicion, temperatura de color y oscuridad del cristal de una
+    sola vez, porque la ganancia se calcula por canal BGR.
+    """
+    h, w = alpha.shape
+    x0, y0, x1, y1 = [int(v) for v in rect_vidrio]
+
+    m_vidrio = np.zeros((h, w), np.float32)
+    cv2.rectangle(m_vidrio, (x0, y0), (x1, y1), 1.0, -1)
+    m_vidrio = cv2.GaussianBlur(m_vidrio, (0, 0), max(1.0, 0.008 * max(w, h)))
+    opaco = (alpha > 0.5).astype(np.float32)
+    m_vidrio *= opaco
+    m_marco = np.clip(1.0 - m_vidrio, 0, 1) * opaco
+
+    out = rgb.astype(np.float32).copy()
+    for mascara, clave in ((m_marco, "marco"), (m_vidrio, "vidrio")):
+        sel = mascara > 0.5
+        if sel.sum() < 30:
+            continue
+        actual = np.median(rgb[sel], 0)
+        objetivo = np.array(ref[clave], np.float32)
+        gain = np.clip(objetivo / np.maximum(actual, 1e-3), 1.0 / gain_max, gain_max)
+        gain = 1.0 + (gain - 1.0) * fuerza
+        out = out * (1 - mascara[..., None]) + out * gain[None, None, :] * mascara[..., None]
+
+    return np.clip(out, 0, 1)
 
 # ===========================================================================
 if __name__ == "__main__":
     detector = DetectorVentanas()                       # una sola vez
 
-    escena = analizar_fachada("./fachada_real.jpg", detector=detector)
+    escena = analizar_fachada("./fachada_real4.jpg", detector=detector)
     debug_escena(escena)
-    escena.guardar("./cache/fachada_real")
+    escena.guardar("./cache/fachada_real4")
 
     # a partir de aqui, cada modelo del catalogo es casi instantaneo
     
@@ -882,7 +983,7 @@ if __name__ == "__main__":
         cv2.imwrite(f"resultado_{nombre}.jpg", img)
         print("->", f"resultado_{nombre}.jpg")'''
 
-    for png in ["./replace2.png"]:
+    for png in ["./replace3.png"]:
         if not os.path.exists(png):
             print(f"[main] no existe {png}")
             continue
