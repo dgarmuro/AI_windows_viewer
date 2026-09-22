@@ -17,34 +17,35 @@ def marcar_esquinas_png(png_path, lado_max=900):
         fondo = np.full(img[:, :, :3].shape, 190, np.uint8)
         fondo[::16, :] = 140
         fondo[:, ::16] = 140
-        vis = (img[:, :, :3] * a + fondo * (1 - a)).astype(np.uint8)
+        vis = (img[:, :, :3] * a + fondo * (1 - a)).astype(np.uint8) # 1 - a para que el fondo no se sume a los colores de la ventana es decir a lo que no es transparente
     else:
         vis = img[:, :, :3].copy()
 
     h, w = vis.shape[:2]
-    esc = min(1.0, lado_max / max(h, w))
+    esc = min(1.0, lado_max / max(h, w)) # Para agrandar si es necesario
     disp = cv2.resize(vis, (int(w * esc), int(h * esc)))
     base = disp.copy()
     pts, win = [], "6 clics: 4 esquinas marco + 2 del vidrio (u=deshacer, q=salir)"
 
+    # Pts son los clisks y win el título de la ventana (identificador)
     def on_mouse(ev, x, y, flags, param):
         if ev == cv2.EVENT_LBUTTONDOWN and len(pts) < 6:
-            pts.append((x / esc, y / esc))
-            col = (0, 0, 255) if len(pts) <= 4 else (0, 200, 255)
+            pts.append((x / esc, y / esc)) # Para pasarlos al tam original
+            col = (0, 0, 255) if len(pts) <= 4 else (0, 200, 255) # Circulo rojo para marco
             cv2.circle(disp, (x, y), 6, col, -1)
             cv2.putText(disp, str(len(pts)), (x + 9, y - 9),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2)
             cv2.imshow(win, disp)
 
-    cv2.namedWindow(win)
+    cv2.namedWindow(win) # Crea la ventana
     cv2.setMouseCallback(win, on_mouse)
     cv2.imshow(win, disp)
     while True:
-        k = cv2.waitKey(20) & 0xFF
+        k = cv2.waitKey(20) & 0xFF # Sirve para que funcione la interacción con la ventana de opencv, Espera 20 ms. Se queda con los 8 bits bajos.
         if k == ord('u') and pts:                 # deshacer
             pts.pop()
             disp[:] = base
-            for i, p in enumerate(pts):
+            for i, p in enumerate(pts): # Vuelve a pintar los puntos sin el que ha quitado
                 q = (int(p[0] * esc), int(p[1] * esc))
                 cv2.circle(disp, q, 6, (0, 0, 255) if i < 4 else (0, 200, 255), -1)
             cv2.imshow(win, disp)
@@ -70,5 +71,5 @@ def marcar_esquinas_png(png_path, lado_max=900):
     print(f"Guardado {destino}")
     return meta
 
-
-marcar_esquinas_png("./replace2.png")
+# Seleccionar 4 esquinas del marco y 2 del vidrio
+marcar_esquinas_png("./replace3.png")
