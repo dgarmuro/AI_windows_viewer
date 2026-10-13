@@ -650,7 +650,9 @@ def _estimar_ruido(img, quad):
     g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
     alta = g - cv2.GaussianBlur(g, (0, 0), 1.5)
     px = alta[m > 0]
-    return float(np.std(px)) if len(px) > 50 else 1.5
+    mad = np.median(np.abs(px - np.median(px)))
+    return float(1.4826 * mad)      # equivalente a sigma para ruido gaussiano
+    #return float(np.std(px)) if len(px) > 50 else 1.5
 
 
 def _color_cielo(img):
@@ -679,21 +681,20 @@ def analizar_fachada(ruta_foto: str,
     H, W = foto.shape[:2]
 
     escala = min(1.0, lado_deteccion / max(H, W))
-    peq = cv2.resize(foto, (int(W * escala), int(H * escala)),
-                     interpolation=cv2.INTER_AREA) if escala < 1 else foto
+    peq = cv2.resize(foto, (int(W * escala), int(H * escala)),interpolation=cv2.INTER_AREA) if escala < 1 else foto
     quad_ref = None
-    if quad_manual is not None:
+    if quad_manual is not None: # Para cuando se seleccionan las 4 esquinas previamente
         quad = ordenar_puntos(np.asarray(quad_manual, np.float32))
         mask_full = np.zeros((H, W), np.uint8)
         cv2.fillConvexPoly(mask_full, quad.astype(np.int32), 255)
         iou = 1.0
     else:
         detector = detector or DetectorVentanas()
-        masks = detector(peq)
+        masks = detector(peq) # Se comporta como función por el método __call__
         masks.sort(key=lambda m: -int((m > 127).sum()))
         mask = masks[min(indice_ventana, len(masks) - 1)]
 
-        gray = cv2.cvtColor(peq, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(peq, cv2.COLOR_BGR2GRAY) # Con esto se pasa a HxW para que ajustar enciuentre bordes, que son saltos de brillo, al hacer lo de gray se queda solo con el brillo.
         quad_peq = ajustar_cuadrilatero(mask, gray)
 
         # metrica de calidad: si el quad no cuadra con la mascara, hay que revisar
@@ -724,8 +725,12 @@ def analizar_fachada(ruta_foto: str,
             cv2.fillConvexPoly(zona, encoder_expandir(quad, 1.25).astype(np.int32), 255)
             acc = np.zeros((H, W), np.uint8)
             for p in ("railing", "plant", "awning", "pipe", "cable"):
-                for m in detector(peq, prompt=p):
-                    acc |= cv2.resize(m, (W, H), interpolation=cv2.INTER_NEAREST)
+                try:
+                    for m in detector(peq, prompt=p):
+                        acc |= cv2.resize(m, (W, H), interpolation=cv2.INTER_NEAREST)
+                except RuntimeError:
+                    pass
+
             oclusores = cv2.bitwise_and(acc, zona)
             if oclusores.sum() == 0:
                 oclusores = None
@@ -776,8 +781,10 @@ def _reflejo_cristal(pre, alpha, color_cielo, intensidad=0.22):
     cielo = np.array(color_cielo, np.float32) / 255.0
     grad = cielo[None, None, :] * (1.0 - t) ** 1.6
     # solo donde hay producto, y mas fuerte en zonas lisas (el vidrio)
-    lisura = 1.0 - np.clip(cv2.Laplacian(
-        cv2.cvtColor(np.clip(pre, 0, 1), cv2.COLOR_BGR2GRAY), cv2.CV_32F, ksize=3) * 6, 0, 1)
+    '''lisura = 1.0 - np.clip(cv2.Laplacian(
+        cv2.cvtColor(np.clip(pre, 0, 1), cv2.COLOR_BGR2GRAY), cv2.CV_32F, ksize=3) * 6, 0, 1)'''
+    lisura = 1.0 - np.clip(np.abs(cv2.Laplacian(
+        cv2.cvtColor(np.clip(pre, 0, 1), cv2.COLOR_BGR2GRAY), cv2.CV_32F, ksize=3)) * 6, 0, 1)
     peso = (intensidad * lisura * alpha)[..., None]
     return np.clip(pre * (1 - peso * 0.4) + grad * peso, 0, 1)
 
@@ -837,6 +844,11 @@ def renderizar(escena: Escena,
 
     # 1) escalar el asset (nine-slice) a un tamano ligeramente superior al final
     tw, th = tam_objetivo(quad_win)
+
+    if supersample > 1.05:
+        s = 0.5 * (supersample - 1.0) + 0.35
+        pre = cv2.GaussianBlur(pre, (0, 0), s)
+        a = cv2.GaussianBlur(a, (0, 0), s)
     pre, a, rect_vidrio = asset.escalar(int(tw * supersample), int(th * supersample))
 
     rgb = pre / np.maximum(a[..., None], 1e-4)
