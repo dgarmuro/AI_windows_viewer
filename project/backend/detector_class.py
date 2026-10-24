@@ -10,53 +10,47 @@ import gc
 import torch
 from PIL import Image
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
-from segment_anything import sam_model_registry, SamPredictor
+
 
 class DetectorVentanas:
     """Envuelve SAM 3 (preferido) con fallback a Grounding DINO + SAM 1.
     """
 
-    def __init__(self, backend: str = "auto",
-                 sam_checkpoint: str = "sam_vit_l_0b3195.pth",
-                 sam3_id: str = "facebook/sam3",
-                 media_precision: bool = True):
-        self.sam_checkpoint = sam_checkpoint
-        self._sam3 = None
-        self._dino = None
-        self._sam1 = None
-
+    def __init__(self, backend="auto", sam_checkpoint="sam_vit_l_0b3195.pth",
+             sam3_id="facebook/sam3", media_precision=True):
+        self.sam_checkpoint, self.sam3_id, self.media_precision = sam_checkpoint, sam3_id, media_precision
+        self._sam3 = self._dino = self._sam1 = None
+        self.backend = backend
         if backend in ("auto", "sam3"):
             try:
-                dev = "cuda" if torch.cuda.is_available() else "cpu"
-                modelo = Sam3Model.from_pretrained(sam3_id)
-                if dev == "cuda" and media_precision:
-                    modelo = modelo.to(dev, torch.bfloat16)   # ~1.7 GB en vez de ~3.5
-                else:
-                    modelo = modelo.to(dev)
-                modelo.eval()
-                proc = Sam3Processor.from_pretrained(sam3_id)
-                self._sam3 = (proc, modelo, dev)
-                self.backend = "sam3"
-                print(f"[detector] SAM 3 cargado en {dev}")
+                self._cargar_sam3(); self.backend = "sam3"
             except Exception as e:
-                if backend == "sam3":
-                    raise
+                if backend == "sam3": raise
                 print(f"[detector] SAM 3 no disponible ({e}); usando DINO+SAM")
                 self.backend = "dino_sam"
-        else:
-            self.backend = backend
+
+    def _cargar_sam3(self):
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
+        modelo = Sam3Model.from_pretrained(self.sam3_id)
+        modelo = modelo.to(dev, torch.bfloat16) if (dev == "cuda" and self.media_precision) else modelo.to(dev)
+        modelo.eval()
+        self._sam3 = (Sam3Processor.from_pretrained(self.sam3_id), modelo, dev)
 
     def liberar(self):
-        """Suelta los pesos de la VRAM. Llamar cuando ya no haga falta detectar."""
-        self._dino = None
-        self._sam1 = None
-        self._sam3 = None
-        self.backend = "liberado"        # evita que se recargue sin querer
+        self._dino = self._sam1 = self._sam3 = None      # sin tocar self.backend
         gc.collect()
-        try:
-            torch.cuda.empty_cache()
-        except Exception:
-            pass
+        try: torch.cuda.empty_cache()
+        except Exception: pass
+
+    def __call__(self, image_bgr, prompt="window"):
+        if self.backend == "sam3":
+            if self._sam3 is None:
+                self._cargar_sam3()
+            return self._detectar_sam3(image_bgr, prompt)
+        return self._detectar_dino_sam(image_bgr)
+
+
+    
 
     def _detectar_sam3(self, image_bgr, prompt):
         
@@ -90,13 +84,9 @@ class DetectorVentanas:
             out.append(m)
         return out
 
-    def __call__(self, image_bgr: np.ndarray, prompt: str = "window") -> List[np.ndarray]:
-        """Devuelve una lista de mascaras uint8 (0/255), una por ventana."""
-        if self.backend == "sam3":
-            return self._detectar_sam3(image_bgr, prompt)
-        return self._detectar_dino_sam(image_bgr)
 
     def _cargar_dino_sam(self):
+        from segment_anything import sam_model_registry, SamPredictor
         if self._dino is None:
             dev = "cuda" if torch.cuda.is_available() else "cpu"
             mid = "IDEA-Research/grounding-dino-base"
