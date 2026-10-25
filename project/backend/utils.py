@@ -47,10 +47,10 @@ def _energia_bordes(quad: np.ndarray, grad: np.ndarray, n: int = 40) -> float:
     for i in range(4): # Recorre los 4 lados
         p0, p1 = quad[i], quad[(i + 1) % 4]
         t = np.linspace(0.05, 0.95, n)[:, None] # genera 40 números repartidos por igual entre 0.05 y 0.95.Son las posiciones relativas a lo largo del lado
-        pts = p0[None, :] * (1 - t) + p1[None, :] * t # añade dim nueva de tam 1: p1[None, :]. Ejemplo: p0= [300 200]; p0[None, :]  →  [[300 200]] 
-        xs = np.clip(pts[:, 0].astype(int), 0, w - 1) # np.clip(valor, minimo, maximo) si el valor es menor que el mínimo, devuelve el mínimo; si es mayor que el máximo, devuelve el máximo; si está dentro, lo devuelve tal cual.
+        pts = p0[None, :] * (1 - t) + p1[None, :] * t # añade dim nueva de tam 1: p1[None, :]. Ejemplo: p0= [300 200]; p0[None, :]  →  [[300 200]]. Es la función para interpolar, los puntos resultantes están entre p0 y p1. Esta función s eobtiene de la distancia entre dos puntos, que da como resultado un vector que indica como se llega desde p0 a p1, el desplazamiento. Si avanzo una fracción t de ese camino, aprtiendo de p0, tengo: p0 + t . d = p0 + t . (p1 - p0). Se ve d como el vector del camino completo y t dice que fracción del camino se recorre: ejemplo: d = (8,4) dice ives 8 a la derecha y 4 hacia abajo siendo p0 = (2, 4) y p1 = (10, 8). t · d es solo el desplazamiento (“cuánto me he movido”), no una posición. Para saber dónde estás, hay que decir desde dónde empezaste, por eso se suma p0.
+        xs = np.clip(pts[:, 0].astype(int), 0, w - 1) # np.clip(valor, minimo, maximo) si el valor es menor que el mínimo, devuelve el mínimo; si es mayor que el máximo, devuelve el máximo; si está dentro, lo devuelve tal cual. pts[:, 0] Recorre cada tupla y coge la primera columna
         ys = np.clip(pts[:, 1].astype(int), 0, h - 1)
-        total += grad[ys, xs].sum()
+        total += grad[ys, xs].sum() # grad[ys, xs] recupera las posiciones de grad
         cuenta += n
     return total / max(cuenta, 1)
 
@@ -66,21 +66,21 @@ def ajustar_cuadrilatero(mask: np.ndarray,
     Convierte la mancha irregular de SAM en un cuadrilátero de cuatro esquinas que respeta la perspectiva.
     """
     m = (mask > 127).astype(np.uint8)
-    contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE) # Devuelve una tupla puntos de un contorno: [[[x1,y1]],[[x2,y2]]...] (columna, fila). Con CHAIN_APPROX_SIMPLE se comprimen ttramos recxtos y asi solo se guardan los extremos. Con RETR_EXTERNAL solo salen los contornos exteriores
     if not contours:
         raise ValueError("Mascara vacia")
     largest = max(contours, key=cv2.contourArea)
 
-    init = ordenar_puntos(cv2.boxPoints(cv2.minAreaRect(largest)))
+    init = ordenar_puntos(cv2.boxPoints(cv2.minAreaRect(largest))) # Se parte como inicio con el cuadrilátero que forma la máscara. MinAreaRect: Rectángulo rotado, de área mínima que encierra el contorno: ((cx, cy), (w, h), ángulo). Donde cx y cy es el centro
 
     grad = None
     if gray is not None:
-        g = cv2.GaussianBlur(gray, (0, 0), 1.2)
-        gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)
+        g = cv2.GaussianBlur(gray, (0, 0), 1.2) # Suaviza la imagen (en escala de grises), calcula el kernel con sigma 1.2. Se marcan mas los grises oscuros
+        gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3) # Derivada horizontal, cuanto cambia el brillo de izda a dcha. Usa CV_32F (float) para que los valores negativos no se pierdan,
         gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
-        grad = cv2.magnitude(gx, gy)
-        grad /= (np.percentile(grad, 99) + 1e-6)
-        grad = np.clip(grad, 0, 1)
+        grad = cv2.magnitude(gx, gy) # Fuerza del borde en cad píxel sin importar la magnitud: sqrt(gx² + gy²). Marca mas los perfiles
+        grad /= (np.percentile(grad, 99) + 1e-6) # Normaliza dividiendo por el percentil 99. Así el 1% de píxeles más fuertes pasa de 1, y el resto queda escalado respecto a ellos. Es más robusto que dividir por el máximo, que un solo píxel extremo podría disparar. El 1e-6 evita dividir por cero en una imagen totalmente plana.
+        grad = np.clip(grad, 0, 1) # Recorta lo que pasó de 1, dejando el rango final en [0, 1].
 
     area_ref = float(m.sum())
     lienzo = np.empty_like(m)
@@ -100,12 +100,18 @@ def ajustar_cuadrilatero(mask: np.ndarray,
             c += 1.0
         return c
 
-    res = minimize(coste, init.ravel(), method="Powell", options={"maxiter": 2000, "xtol": 0.5, "ftol": 1e-4}) # prueba valores y se queda con los que bajan el coste. Powell no necesita derivadas, que aquí no existen porque el coste es un conteo de píxeles. Empieza en minAreaRect y va empujando esquinas hasta que encaja.
+    res = minimize(coste, init.ravel(), method="Powell", options={"maxiter": 2000, "xtol": 0.5, "ftol": 1e-4}) # prueba valores y se queda con los que bajan el coste. Powell no necesita derivadas, que aquí no existen porque el coste es un conteo de píxeles. Empieza en minAreaRect y va empujando esquinas hasta que encaja. Se usa ravel pues minimize requiere un vector plano.
     quad = ordenar_puntos(res.x.reshape(4, 2))
 
     # si la optimizacion empeoro las cosas, nos quedamos con la inicial
     return quad if coste(quad.ravel()) <= coste(init.ravel()) else init
 
+def get_center_tam_mask(m):
+    """Centro y tamaño de una máscara: (cx, cy, ancho, alto)."""
+    ys, xs = np.nonzero(np.asarray(m)) # Coordenadas de todos los píxeles de la máscara, los que no valen 0 o False. Devuelve par aimagen 2D un array con als filas y otro con las columnas.
+    if xs.size == 0:
+        return None
+    return xs.mean(), ys.mean(), xs.max() - xs.min() + 1, ys.max() - ys.min() + 1 # ptp es peak to peak: la amplitud, máximo menos mínimo, es como xs.max() - xs.min(), la distancia entre el píxel más a la izquierda y el más a la derecha. Esto da el ancho
 
 def tam_objetivo(quad: np.ndarray) -> Tuple[int, int]:
     """Tamano en pixeles que ocupa el cuadrilatero (media de lados opuestos)."""
@@ -381,8 +387,11 @@ def filtrar_oclusores(acc, quad, margen=1.03):
  
 
 def imread_u(ruta, flags=cv2.IMREAD_COLOR):
-    datos = np.fromfile(ruta, np.uint8)
-    return cv2.imdecode(datos, flags) if datos.size else None
+    """
+    Reemplaza a img = cv2.imread(ruta), pues puede fallar para rutas con caracteres unicode
+    """
+    datos = np.fromfile(ruta, np.uint8) # Devuelve los bytes del archivo
+    return cv2.imdecode(datos, flags) if datos.size else None # Decodifica los bytes y los convierte en una matriz de pixeles
  
 def imwrite_u(ruta, img):
     ext = os.path.splitext(ruta)[1] or ".png"

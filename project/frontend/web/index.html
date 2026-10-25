@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vano · Prueba tus ventanas</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Prueba ventanas nuevas sobre la foto de tu fachada antes de cambiarlas.">
+<meta name="theme-color" content="#F2F3EF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vano">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="iconos/icono-192.png">
+<link rel="icon" href="iconos/icono-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,650;12..96,750&family=Figtree:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app" id="app">
+  <main id="pantalla" class="pantalla" tabindex="-1"></main>
+  <nav class="pestanas" id="pestanas" aria-label="Secciones">
+    <button data-tab="inicio" class="activa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5V20h-5.5v-5.5h-5V20H4z"/></svg><span>Inicio</span></button>
+    <button data-tab="catalogo"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M12 4v16M4 12h16"/></svg><span>Ventanas</span></button>
+    <button data-tab="proyectos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A1.5 1.5 0 0 1 5.5 6H10l2 2h6.5A1.5 1.5 0 0 1 20 9.5V18a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18z"/></svg><span>Proyectos</span></button>
+  </nav>
+  <div class="hoja-fondo" id="hoja-fondo" hidden></div>
+  <section class="hoja" id="hoja" role="dialog" aria-modal="true" hidden></section>
+  <div class="cargando" id="cargando" hidden><div class="escaner"></div><p id="cargando-texto"></p></div>
+  <div class="toast" id="toast" role="status" hidden></div>
+</div>
+
+<script src="catalogo.js"></script>
+<script src="ejemplos.js"></script>
+<script src="motor.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
