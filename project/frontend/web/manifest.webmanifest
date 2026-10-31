@@ -1,14 +1,14 @@
 {
-  "name": "Vano · Prueba tus ventanas",
-  "short_name": "Vano",
+  "name": "Prueba tus ventanas",
+  "short_name": "Ventanas",
   "description": "Prueba ventanas nuevas sobre la foto de tu fachada.",
   "lang": "es",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#F2F3EF",
-  "theme_color": "#F2F3EF",
+  "background_color": "#F6F7F9",
+  "theme_color": "#F6F7F9",
   "icons": [
     { "src": "iconos/icono-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "iconos/icono-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }

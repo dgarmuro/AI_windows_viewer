@@ -1,80 +1,54 @@
-# Vano · app del cliente
-
-App para que el cliente final pruebe ventanas del catálogo sobre la foto de su fachada.
-Funciona **sin servidor**: todo se calcula en el propio móvil (catálogo, detección de ejemplo,
-composición en perspectiva con luz de la pared, presupuesto orientativo y proyectos guardados).
+# Frontend (app web instalable) + servidor
 
 ```
-web/
-  index.html            página única
-  app.css               estilos (modo claro y oscuro)
-  app.js                pantallas y navegación
-  motor.js              dibujo vectorial de ventanas + composición sobre la foto
-  catalogo.js           modelos, colores, perfiles y precios   ← edita aquí tu catálogo
-  ejemplos.js           fotos de ejemplo con sus ventanas marcadas
-  manifest.webmanifest  datos para instalarla como app
-  sw.js                 caché para abrir sin conexión
-  iconos/  img/
+project/
+  backend/
+    main.py               FastAPI: sirve frontend/web y la API
+    servicio.py           puente con replacer, utils, auto_interior, luz...
+    preparar_assets.py    6 clics por PNG -> resources/catalogo_imgs_json/<nombre>.json
+    resources/
+      catalogo_imgs/        PNG del catálogo  (uno por color)
+      catalogo_imgs_json/   sidecar de cada PNG (mismo nombre)
+    datos/                se crea solo: sesiones, presupuestos, caché
+  frontend/web/           la app
 ```
 
-## Probar en el ordenador
+## Arrancar
 
 ```bash
-cd web
-python3 -m http.server 8000
+cd project/backend
+pip install fastapi uvicorn python-multipart pillow     # una vez
+python main.py
 ```
-Abre http://localhost:8000. Usa las herramientas de desarrollador en modo móvil (Ctrl+Shift+M en Chrome)
-para verla con tamaño de teléfono. En el ordenador, «Hacer una foto» y «Galería» abren el selector de archivos.
+- Ordenador: http://localhost:8000
+- Móvil (misma wifi): `http://IP-DEL-ORDENADOR:8000`  (IP con `hostname -I`)
+- Para instalarla como app hace falta https: `cloudflared tunnel --url http://localhost:8000`
 
-## Probar en el móvil
+## Añadir un producto
 
-**Misma wifi (lo más rápido).** Con el servidor anterior en marcha, busca la IP del ordenador
-(`ipconfig` en Windows, `ip addr` o `ifconfig` en Linux/Mac) y abre en el móvil `http://192.168.X.X:8000`.
-Todo funciona, salvo instalarla como app y el modo sin conexión: eso exige HTTPS.
+1. Copia el PNG a `backend/resources/catalogo_imgs/`.
+2. `python preparar_assets.py resources/catalogo_imgs/mi_ventana.png` (6 clics).
+3. Completa el JSON que se crea en `catalogo_imgs_json/` con los datos de la app (todos opcionales):
 
-**Con HTTPS (para instalarla).** Cualquiera de estas opciones vale:
-- `npx localtunnel --port 8000` o `cloudflared tunnel --url http://localhost:8000` dan una URL https temporal.
-- Sube la carpeta `web/` a Netlify Drop (arrastrar y soltar), GitHub Pages o Vercel.
+```json
+{
+  "modelo": "aura-70-duo",
+  "nombre": "Aura 70 Duo",
+  "material": "PVC",
+  "apertura": "Oscilobatiente, 2 hojas",
+  "lema": "La ventana de dos hojas para casi cualquier fachada.",
+  "color": {"nombre": "Blanco", "codigo": "RAL 9016", "hex": "#F1F0EB"},
+  "precio_m2": 295,
+  "destacado": true,
+  "ficha": {"Transmitancia Uw": "1,2 W/m²K", "Aislamiento acústico": "36 dB", "Garantía": "10 años"},
+  "ancho_mm": 1200, "alto_mm": 1400
+}
+```
+PNG con el mismo `modelo` salen como colores de un mismo producto. Recarga la app: no hace falta reiniciar.
 
-Después, en **Android (Chrome)**: menú ⋮ → *Instalar app*. En **iPhone (Safari)**: Compartir → *Añadir a pantalla de inicio*.
-Se abre a pantalla completa, con su icono, como una app más.
+## Variables de entorno (opcionales)
 
-## Qué hace
+`PUERTO` (8000) · `WEB_DIR` (../frontend/web) · `CATALOGO_DIR` · `SIDECAR_DIR` · `DATOS_DIR` ·
+`LIBERAR_DETECTOR` (1: libera SAM tras detectar) · `DIAS_SESION` (7) · `CORS_ORIGENES` (*)
 
-1. **Inicio**: comparador antes/después, cómo funciona y modelos destacados.
-2. **Ventanas (catálogo)**: búsqueda, filtros por material y guardadas (♥).
-3. **Ficha**: vista a escala que cambia de color al momento, cifras (Uw, dB, garantía), especificaciones y precio.
-4. **Tu fachada** (1/3): cámara, galería o dos fotos de ejemplo.
-5. **Elige ventanas** (2/3): toca las ventanas para elegirlas o descartarlas, ajusta sus 4 esquinas,
-   añade otras y, si quieres, mete las medidas reales (ancho × alto en mm, para una o para todas).
-   Con medidas el perfil sale a escala real y el precio se afina.
-6. **Resultado** (3/3): comparador deslizante, cambio de modelo y color en vivo, precio orientativo,
-   guardar el proyecto, descargar la imagen y pedir presupuesto.
-7. **Pedir presupuesto** → confirmación. **Proyectos**: lo guardado y lo pedido, en el propio dispositivo.
-
-Sin backend, en las fotos del cliente no hay detección automática: aparece un marco en el centro para
-colocarlo sobre la ventana. Las fotos de ejemplo traen las ventanas ya detectadas.
-
-## Conectar el backend más adelante
-
-En `app.js` están marcados con `[BACKEND]` los tres puntos a sustituir:
-
-| Punto | Ahora | Con backend |
-|---|---|---|
-| `usarArchivo()` | marco centrado | `POST /api/analizar` con la foto → lista de quads |
-| `componer()` en Resultado | `Motor.componer` (vectorial, en el móvil) | `POST /api/render` con foto, quads, medidas y producto → imagen |
-| envío en Presupuesto | se guarda en `localStorage` | `POST /api/presupuesto` |
-
-Los datos ya tienen la forma que espera el pipeline: cada ventana es `{quad: [[x,y]×4], ancho_mm, alto_mm}`
-en píxeles de la foto (lado mayor 1600 px). El catálogo puede pasar a venir de `/api/catalogo` con los PNG reales.
-
-## Publicar en Play Store / App Store
-
-La app ya es una PWA instalable. Para las tiendas:
-- **Android**: empaquétala como TWA con [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap) o PWABuilder
-  apuntando a la URL https donde la publiques.
-- **Android + iOS**: [Capacitor](https://capacitorjs.com) — `npm i @capacitor/core @capacitor/cli`,
-  `npx cap init Vano es.vano.app --web-dir web`, `npx cap add android`, `npx cap add ios`.
-  La carpeta `web/` se usa tal cual. iOS requiere un Mac con Xcode.
-
-Al cambiar archivos, sube `VERSION` en `sw.js` para que los móviles descarguen la versión nueva.
+Si la app se empaqueta (Capacitor/TWA) o va en otro dominio: `web/config.js` → `window.API_BASE = "https://..."`.

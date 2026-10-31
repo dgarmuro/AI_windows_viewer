@@ -82,6 +82,10 @@ def _pico_cerca(p, centro, radio):
     a, b = max(3, centro - radio), min(len(p), centro + radio + 1)
     return a + int(np.argmax(p[a:b])) if b > a else centro
 
+def _tramo(p, n):
+    t = p[:n]
+    return np.pad(t, (0, n - t.size))
+
 def detectar_interiores_fachada(foto, quads_ext, ancho=320, max_rec=0.25, max_jamba=0.18,
                                 radio=6, min_voto_jamba=0.25):
     """Plano interior de TODAS las ventanas de una fachada a la vez.
@@ -98,6 +102,7 @@ def detectar_interiores_fachada(foto, quads_ext, ancho=320, max_rec=0.25, max_ja
     for p, _, _ in perf:
         for nom in LADOS:
             voto += p[nom][:n]
+            voto += _tramo(p[nom], n)
     voto = np.convolve(voto, np.ones(5) / 5, mode="same")
     i0 = int(0.04 * ancho)
     S = int(np.argmax(voto[i0:])) + i0

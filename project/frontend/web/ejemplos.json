@@ -1,6 +1,4 @@
-// Fotos de ejemplo con sus ventanas ya detectadas (coordenadas en pixeles de la imagen).
-// Cuando se conecte el backend, esto lo devolvera la deteccion automatica.
-window.EJEMPLOS = [
+[
  {
   "id": "ejemplo-casa-blanca",
   "nombre": "Casa de pueblo",
@@ -129,22 +127,22 @@ window.EJEMPLOS = [
   "ventanas": [
    [
     [
-     406.3999938964844,
-     588.5999755859375
+     406.4,
+     588.6
     ],
     [
      530.5,
-     588.5999755859375
+     588.6
     ],
     [
      530.5,
-     722.7999877929688
+     722.8
     ],
     [
-     406.3999938964844,
-     722.7999877929688
+     406.4,
+     722.8
     ]
    ]
   ]
  }
-];
+]

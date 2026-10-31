@@ -116,7 +116,7 @@ def get_center_tam_mask(m):
 def tam_objetivo(quad: np.ndarray) -> Tuple[int, int]:
     """Tamano en pixeles que ocupa el cuadrilatero (media de lados opuestos)."""
     tl, tr, br, bl = quad
-    w = 0.5 * (np.linalg.norm(tr - tl) + np.linalg.norm(br - bl)) # es la distancia euclídea entre dos puntos
+    w = 0.5 * (np.linalg.norm(tr - tl) + np.linalg.norm(br - bl)) # np.linalg.norm(tr - tl) es la longitud del lado de arriba, la distancia euclídea √(dx² + dy²) entre las dos esquinas. W es la media del lado horizontal.
     h = 0.5 * (np.linalg.norm(bl - tl) + np.linalg.norm(br - tr))
     return max(int(round(w)), 8), max(int(round(h)), 8)
 
@@ -141,16 +141,35 @@ def encoder_expandir(quad: np.ndarray, factor: float) -> np.ndarray:
     return (c + (quad - c) * factor).astype(np.float32)
 
 
-def _estimar_ruido(img, quad):
-    """Sigma del ruido en la pared, para poder igualarlo en el parche pegado."""
+def _estimar_ruido(img, quad, bloque=8, pct=10):
+    """Sigma del ruido de CAMARA en la pared, para igualarlo en la ventana pegada.
+
+    Antes se media en todo el anillo de pared, y en ladrillo, piedra o azulejo las
+    juntas y la textura contaban como ruido: el grano salia 2-3 veces mas fuerte
+    que el de la foto y la ventana nueva se veia granulada. Ahora se mide solo en
+    los bloques MAS LISOS del anillo (percentil bajo): ahi solo queda el ruido."""
     m = np.zeros(img.shape[:2], np.uint8)
     cv2.fillConvexPoly(m, encoder_expandir(quad, 1.6).astype(np.int32), 255)
     cv2.fillConvexPoly(m, encoder_expandir(quad, 1.05).astype(np.int32), 0)
     g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
     alta = g - cv2.GaussianBlur(g, (0, 0), 1.5)
-    px = alta[m > 0]
-    mad = np.median(np.abs(px - np.median(px)))
-    return float(1.4826 * mad)      # equivalente a sigma para ruido gaussiano
+    x0, y0, w, h = cv2.boundingRect(m)
+    sds = []
+    for y in range(y0, y0 + h - bloque + 1, bloque):
+        for x in range(x0, x0 + w - bloque + 1, bloque):
+            if m[y:y + bloque, x:x + bloque].min() == 0:
+                continue
+            b = g[y:y + bloque, x:x + bloque]
+            if b.min() < 8 or b.max() > 247:                 # sin negros ni quemados (no tienen ruido)
+                continue
+            sds.append(float(alta[y:y + bloque, x:x + bloque].std()))
+    if len(sds) >= 20:
+        # en bloques de 8x8 el percentil 10 da ~0.84 sigma con ruido puro: se corrige
+        return float(np.percentile(sds, pct)) / 0.84
+    px = alta[m > 0]                                         # muy poca pared: el metodo de antes
+    if px.size == 0:
+        return 0.0
+    return float(1.4826 * np.median(np.abs(px - np.median(px))))
     #return float(np.std(px)) if len(px) > 50 else 1.5
 
 

@@ -59,13 +59,13 @@ def analizar_fachada(ruta_foto: str,
  
         sx, sy = W / peq.shape[1], H / peq.shape[0]
         factor = np.array([sx, sy], np.float32) # es cuántos píxeles originales hay por cada píxel pequeño en horizontal.
-        ref = get_center_tam_mask(mask[idx])
+        ref = get_center_tam_mask(mask > 127)
         candidatas = []
         for i, m_alt in enumerate(masks):
             if i == idx:
                 continue
             try:
-                m_data = get_center_tam_mask(m_alt)
+                m_data = get_center_tam_mask(m_alt > 127)
                 if m_data is None:
                     continue
                 dx = abs(m_data[0] - ref[0]) / ref[2]                        # distancia horizontal, en anchos de ventana
